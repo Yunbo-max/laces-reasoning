@@ -169,7 +169,16 @@ def _configure_trainable_parameters(
         if getattr(model, "use_learnable_blend", False) and getattr(model, "blend_gate_logit", None) is not None:
             model.blend_gate_logit.requires_grad = True
     elif train_stage == 2:
-        dit_module = model.trajectory_dit if trajectory_mode else model.latent_dit
+        # Pick the denoiser the forward pass actually routes the diffusion loss through.
+        # `trajectory_mode` alone is not enough: in global mode the denoiser is selected by
+        # global_denoiser_type (models/state_hijacking_dit._global_denoise). Selecting by
+        # trajectory_mode only would leave latent_dit trainable while the loss flows into a
+        # frozen trajectory_dit, so the denoiser never updates at all -- measured on the two
+        # 2.9B global-birwkv runs, whose latent_dit AND trajectory_dit were both bit-identical
+        # to their resume checkpoints after 50k steps.
+        gdt = str(getattr(model, "global_denoiser_type", "dit")).lower()
+        dit_module = model.trajectory_dit if (trajectory_mode or gdt in ("rwkv", "birwkv")) \
+            else model.latent_dit
         _set_module_trainable(dit_module, not freeze_s2)
         if s2_unfreeze_s1:
             if s2_unfreeze_s0:
