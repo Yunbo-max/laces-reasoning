@@ -1,0 +1,105 @@
+{
+  "checkpoint": {
+    "dir": "/inspire/hdd/global_user/zhangjiaquan-253108540222/research/laces-reasoning/outputs_dynamic_basis/laces-2.9B-dynlowrank-r32-global-joint-b16-50k/step_00050000",
+    "model_pt": "/inspire/hdd/global_user/zhangjiaquan-253108540222/research/laces-reasoning/outputs_dynamic_basis/laces-2.9B-dynlowrank-r32-global-joint-b16-50k/step_00050000/model.pt",
+    "mtime_epoch": 1789674530.1046786,
+    "mtime_iso": "2026-09-17T19:48:50.104679",
+    "n_trainable_tensors": 189,
+    "sha256": "55bc5c7bf8d0a242c0a007d57c7e4d8114ce8b80ea6331ba43865125d6b2a573",
+    "size_bytes": 1492023287,
+    "step_in_ckpt": 50000
+  },
+  "decoder": {
+    "bos_token_id": 1,
+    "config_json": "/inspire/hdd/global_user/zhangjiaquan-253108540222/research/laces-reasoning/models/RWKV7-Goose-World3-2.9B-HF-fla-v2/config.json",
+    "d_model": 2560,
+    "eos_token_id": 2,
+    "head_dim": 64,
+    "layers": 32,
+    "max_position_embeddings": 2048,
+    "model_type": "rwkv7",
+    "n_heads": 40,
+    "n_heads_source": "derived: hidden_size // head_dim (config.json num_heads is null)",
+    "path": "/inspire/hdd/global_user/zhangjiaquan-253108540222/research/laces-reasoning/models/RWKV7-Goose-World3-2.9B-HF-fla-v2",
+    "vocab_size": 65536
+  },
+  "env": {
+    "RELAY_INJECT_ZERO_RNN_CACHE": "0",
+    "torch": "2.8.0a0+5228986c39.nv25.06"
+  },
+  "generated_by": "scripts/eval/latentuse/provenance.py",
+  "git": {
+    "branch": "main",
+    "dirty": true,
+    "head": "ef3a7cd034f4795f6c6f42a9afc883fcb64e6879",
+    "n_dirty_paths": 183,
+    "repo": "/inspire/hdd/global_user/zhangjiaquan-253108540222/research/laces-reasoning"
+  },
+  "model_config": {
+    "encoder_type": "variational",
+    "gen_type": "ddpm",
+    "global_denoiser_type_present": false,
+    "global_denoiser_type_value": null,
+    "injection_branch": "non-rnn(zero conv/ffn)",
+    "latent_dim": 32,
+    "n_basis": 16,
+    "s1_dyn_hidden": 128,
+    "s1_rank": 32,
+    "s1_writer_type": "dynlowrank",
+    "trajectory_mode": false,
+    "use_cond_boundary": true
+  },
+  "state_scale": 0.1848476082086563,
+  "training_config": {
+    "cfg_drop_prob": 0.1,
+    "max_length": 512,
+    "num_train_steps": 50000,
+    "prefix_suffix_s2": true,
+    "resume": "outputs_dynamic_basis/laces-2.9B-dynlowrank-r32-s0frozen-joint-b4-50k-fla03/step_00030000",
+    "s2_unfreeze_s0": false,
+    "s2_unfreeze_s1": true,
+    "seed": 42,
+    "stage": 2,
+    "token_dir": "/inspire/hdd/global_user/zhangjiaquan-253108540222/research/DiffRwkv/preprocessed_data/owt_rwkv_tokens/train"
+  },
+  "writer_shapes": {
+    "mu_head.weight": {
+      "dtype": "torch.bfloat16",
+      "shape": [
+        32,
+        10240
+      ]
+    },
+    "s1_trunk.0.weight": {
+      "dtype": "torch.bfloat16",
+      "shape": [
+        128,
+        32
+      ]
+    },
+    "s1_u_head.weight": {
+      "dtype": "torch.bfloat16",
+      "shape": [
+        2621440,
+        128
+      ]
+    },
+    "s1_v_head.weight": {
+      "dtype": "torch.bfloat16",
+      "shape": [
+        65536,
+        128
+      ]
+    },
+    "state_basis": {
+      "dtype": "torch.bfloat16",
+      "shape": [
+        32,
+        16,
+        40,
+        64,
+        64
+      ]
+    }
+  }
+}

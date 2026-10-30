@@ -12,7 +12,7 @@ data:
 model:
   type: "rwkv_state_hijack_dit"
   rwkv_name: "RWKV/RWKV7-Goose-World3-2.9B-HF"
-  rwkv_local_path: "/inspire/hdd/global_user/zhangjiaquan-253108540222/models/RWKV7-Goose-World3-2.9B-HF"
+  rwkv_local_path: "/inspire/hdd/global_user/zhangjiaquan-253108540222/backup/laces-reasoning/models/RWKV7-Goose-World3-2.9B-HF"
   rwkv_trust_remote_code: true
   add_mask_token: false
   pad_token_strategy: "eos"

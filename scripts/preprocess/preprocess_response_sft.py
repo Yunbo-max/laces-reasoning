@@ -20,7 +20,7 @@ def parse_args():
     p.add_argument("--config", default=None, help="HuggingFace dataset config")
     p.add_argument("--split", default="train")
     p.add_argument("--output_dir", required=True)
-    p.add_argument("--model_path", default="/inspire/hdd/global_user/zhangjiaquan-253108540222/models/RWKV7-Goose-World3-2.9B-HF")
+    p.add_argument("--model_path", default="/inspire/hdd/global_user/zhangjiaquan-253108540222/backup/laces-reasoning/models/RWKV7-Goose-World3-2.9B-HF")
     p.add_argument("--max_length", type=int, default=512)
     p.add_argument("--max_samples", type=int, default=None)
     p.add_argument("--filename_prefix", default="sft")

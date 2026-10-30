@@ -17,15 +17,9 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 PREPARE_SCRIPT="${REPO_ROOT}/training/qizhi/prepare_benchmark_suite.py"
 
-# Models and benchmarks to test
+# Models and runnable benchmark bundles to test.
 ALL_MODELS=("dynamic-basis" "fixed-basis" "raw-rwkv")
-# The order here defines the execution order within the job
-ALL_BENCHMARKS=(
-    "mmlu_pro" "mmlu_redux" "gpqa_diamond" "c_eval" "gsm8k"
-    "lambada" "piqa" "hellaswag" "winogrande" "arc_easy"
-    "arc_challenge" "glue" "sciq" "squad" "storycloze"
-    "ifeval" "bfcl" "truthfulqa" "known_unknowns" "babilong"
-)
+ALL_BENCHMARKS=("gsm8k" "cola8" "mcpack")
 
 # --- Argument Parsing ---
 DRY_RUN=0

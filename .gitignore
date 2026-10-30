@@ -16,3 +16,10 @@ models/RWKV7-Goose-World3-2.9B-HF-fla-v2/
 data/
 results/
 *.log
+.omo/
+logs/
+latentuse_g2_out/
+latentuse_g3/
+latentuse_g3_a0/
+
+task_data/

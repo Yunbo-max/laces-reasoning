@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sys
 from pathlib import Path
 from typing import Any, Optional, cast
@@ -176,17 +177,46 @@ def get_question(item: dict[str, Any]) -> str:
     return str(item.get("question", item.get("prompt", item.get("context", ""))))
 
 
+_OPTION_MARKER_RE = re.compile(r"\(A\)")
+
+
+def inline_choices(prompt: str, item: dict[str, Any]) -> str:
+    """Inline the item's ``choices`` when the prompt does not already carry them.
+
+    Six tasks in the shared task data (arc_easy, arc_challenge, winogrande, sciq,
+    commonsenseqa, piqa) ship ``choices`` but build ``prompt`` WITHOUT an option
+    list, so every model used to answer those six columns without ever seeing the
+    options. mmlu/obqa/siqa/story_cloze/hellaswag/race already carry a
+    ``(A) ... / (B) ...`` block (and ``apply_prompt_template`` below builds one), so
+    the guard returns those prompts byte-identical -- this is idempotent.
+    """
+    choices = item.get("choices") if isinstance(item, dict) else None
+    if not isinstance(choices, (list, tuple)) or not choices:
+        return prompt
+    m = _OPTION_MARKER_RE.search(prompt)
+    if m is not None and str(choices[0]).strip().lower() in prompt[m.start():].lower():
+        return prompt  # already carries an option list -- never add a second copy
+    block = "\n".join(f"({chr(65 + i)}) {c}" for i, c in enumerate(choices))
+    cut = prompt.rfind("Answer:")
+    if cut == -1:
+        return f"{prompt}\n{block}\nAnswer:"
+    return f"{prompt[:cut].rstrip()}\n{block}\nAnswer:"
+
+
 def build_prompt(task: str, item: dict[str, Any]) -> str:
     if "prompt" in item and isinstance(item["prompt"], str) and item["prompt"]:
         prefix = item.get("few_shot_prefix")
         if isinstance(prefix, str) and prefix and not item["prompt"].startswith(prefix):
-            return prefix + item["prompt"]
-        return item["prompt"]
-    return apply_prompt_template(
-        task,
-        str(item.get("context", "")),
-        get_question(item),
-        item.get("choices", None),
+            return inline_choices(prefix + item["prompt"], item)
+        return inline_choices(item["prompt"], item)
+    return inline_choices(
+        apply_prompt_template(
+            task,
+            str(item.get("context", "")),
+            get_question(item),
+            item.get("choices", None),
+        ),
+        item,
     )
 
 

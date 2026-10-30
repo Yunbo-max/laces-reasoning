@@ -1,16 +1,12 @@
 #!/usr/bin/env bash
-# Main runner for submitting all evaluation jobs to Qizhi.
-# This script encapsulates the logic for running the full benchmark suite
-# across all three target models: raw-rwkv, fixed-basis, and dynamic-basis.
 
 set -euo pipefail
 
 # --- Configuration ---
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 PREPARE_SCRIPT="${REPO_ROOT}/training/qizhi/prepare_benchmark_suite.py"
 
-# All models to be evaluated
 MODELS_TO_RUN=("raw-rwkv" "fixed-basis" "dynamic-basis")
 
 # --- Main Loop ---
@@ -22,10 +18,7 @@ for model in "${MODELS_TO_RUN[@]}"; do
     echo "
 ---> Preparing and submitting job for Model: ${model}"
     
-    # The Python script now generates a single command for all 20 benchmarks.
-    # We pipe this directly to qz train CreateJob.
-    # The script will use the correct spec_id and logic_compute_group_id internally.
-    job_json=$(python3 "${PREPARE_SCRIPT}" --model-type "${model}")
+    job_json=$(python3 "${PREPARE_SCRIPT}" --model-type "${model}" --benchmark gsm8k cola8 mcpack)
 
     if [ $? -ne 0 ]; then
         echo "Error: Failed to generate job JSON for model ${model}. Aborting." >&2
@@ -33,7 +26,7 @@ for model in "${MODELS_TO_RUN[@]}"; do
     fi
 
     echo "Submitting job to Qizhi..."
-    echo "${job_json}" | qz train CreateJob --data @-
+    qz train CreateJob --data "${job_json}"
 
     if [ $? -ne 0 ]; then
         echo "Error: Qizhi job submission failed for model ${model}." >&2

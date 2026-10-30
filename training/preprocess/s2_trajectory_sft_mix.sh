@@ -38,7 +38,7 @@ MIN_PROMPT_TOKENS="${SFT_PROMPT_TOKENS:-${CHUNK}}"
 if [[ -z "${MODEL_PATH}" ]]; then
   case "${BACKBONE}" in
     0.4B) MODEL_PATH="/inspire/hdd/global_user/zhangjiaquan-253108540222/models/rwkv7-0.4B-world" ;;
-    2.9B) MODEL_PATH="/inspire/hdd/global_user/zhangjiaquan-253108540222/models/RWKV7-Goose-World3-2.9B-HF" ;;
+    2.9B) MODEL_PATH="/inspire/hdd/global_user/zhangjiaquan-253108540222/backup/laces-reasoning/models/RWKV7-Goose-World3-2.9B-HF" ;;
     13.3B) MODEL_PATH="/inspire/hdd/global_user/zhangjiaquan-253108540222/models/rwkv7-13.3B-world" ;;
     *) echo "Unsupported BACKBONE=${BACKBONE}" >&2; exit 2 ;;
   esac

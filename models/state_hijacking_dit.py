@@ -44,6 +44,7 @@ from typing import List, Optional, Tuple, cast
 
 import inspect
 import math
+import os
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -905,6 +906,12 @@ class StateInjectionDiTRELAY(nn.Module):
         else:
             self.register_parameter("blend_gate_logit", None)
         trajectory_denoiser_type = str(getattr(config, "trajectory_denoiser_type", "dit"))
+        # In global (non-trajectory) mode trajectory_denoiser_type is inert, because
+        # trajectory_dit is never built and the plain latent_dit drives z. This key
+        # selects the denoiser that actually drives the single global latent.
+        self.global_denoiser_type = str(getattr(config, "global_denoiser_type", "dit")).lower()
+        if self.global_denoiser_type not in ("dit", "rwkv", "birwkv"):
+            raise ValueError(f"Unknown global_denoiser_type: {self.global_denoiser_type}")
         self.latent_rwkv_variant = resolve_latent_rwkv_variant(config)
         self.latent_rwkv_module = "AlbatrossRWKV7Block" if self.latent_rwkv_variant == "albatross_goose" else "LatentRWKV7Direction"
         self.latent_rwkv_evidence = f"latent_rwkv_variant={self.latent_rwkv_variant} module={self.latent_rwkv_module}"
@@ -936,6 +943,20 @@ class StateInjectionDiTRELAY(nn.Module):
             )
         elif self.trajectory_enabled:
             raise ValueError(f"Unknown trajectory_denoiser_type: {trajectory_denoiser_type}")
+        elif self.global_denoiser_type in ("rwkv", "birwkv"):
+            # Global mode driven by a recurrent denoiser. Built with the full configured
+            # horizon so it stays weight-compatible with a trajectory checkpoint; a global
+            # run only ever feeds position 0 (H=1 <= horizon, see _global_denoise).
+            self.trajectory_dit = TrajectoryLatentRWKV(
+                latent_dim=latent_dim,
+                horizon=self.trajectory_horizon,
+                hidden_size=dit_hidden,
+                depth=dit_depth,
+                bidirectional=self.global_denoiser_type == "birwkv",
+                use_cond_adaln=self.use_cond_adaln,
+                use_cond_boundary=self.use_cond_boundary,
+                variant=self.latent_rwkv_variant,
+            )
         else:
             self.trajectory_dit = None
         self.trajectory_state_decoder = TrajectoryStateDecoder(
@@ -1106,6 +1127,24 @@ class StateInjectionDiTRELAY(nn.Module):
                 "t_mean": 0.0,
             }
         return dummy_logits, dummy_eps, dummy_eps.clone(), extras
+
+    def _active_denoiser(self) -> nn.Module:
+        """The module that actually denoises the latents in the current mode."""
+        if self.trajectory_enabled or self.global_denoiser_type in ("rwkv", "birwkv"):
+            return self.trajectory_dit
+        return self.latent_dit
+
+    def _global_denoise(self, z_t: torch.Tensor, t: torch.Tensor,
+                        cond: Optional[torch.Tensor] = None) -> torch.Tensor:
+        """Denoise a *global* latent ``z_t`` of shape ``[B, latent_dim]``.
+
+        Routes to the configured global denoiser. With a recurrent denoiser the global
+        latent is presented as a length-1 sequence, so a horizon-H RWKV module consumes
+        position 0 only and the output is squeezed back to ``[B, latent_dim]``.
+        """
+        if self.global_denoiser_type in ("rwkv", "birwkv"):
+            return self.trajectory_dit(z_t.unsqueeze(1), t, cond=cond).squeeze(1)
+        return self.latent_dit(z_t, t, cond=cond)
 
     def predict_states(self, z: torch.Tensor) -> List[torch.Tensor]:
         scale = self.state_scale.to(z.dtype)
@@ -1881,7 +1920,7 @@ class StateInjectionDiTRELAY(nn.Module):
             t = torch.sigmoid(torch.randn(B, device=device, dtype=z_suffix.dtype) * 0.8 - 0.8)
             t_exp = t.unsqueeze(-1)
             z_t = sphere_flow.slerp(x0, x1, t_exp, radius)
-            v_pred = self.latent_dit(z_t, t, cond=cond)
+            v_pred = self._global_denoise(z_t, t, cond=cond)
             v_pred = sphere_flow.proju(z_t, v_pred, radius)
             eps_target = sphere_flow.slerp_velocity(x0, x1, t_exp, radius)
             eps_pred = v_pred
@@ -1891,7 +1930,7 @@ class StateInjectionDiTRELAY(nn.Module):
             t_exp = t.unsqueeze(-1)
             eps_noise = torch.randn_like(z_suffix)
             z_t = t_exp * z_suffix + (1.0 - t_exp) * eps_noise
-            eps_pred = self.latent_dit(z_t, t, cond=cond)
+            eps_pred = self._global_denoise(z_t, t, cond=cond)
             eps_target = z_suffix - eps_noise if gen_type == 'rf' else z_suffix
             eps_norm = eps_target.detach().norm(dim=-1).mean().item()
         else:
@@ -1901,7 +1940,7 @@ class StateInjectionDiTRELAY(nn.Module):
             sqrt_1mab = (1.0 - alpha_bar).sqrt().unsqueeze(-1)
             eps_target = torch.randn_like(z_suffix)
             z_t = sqrt_ab * z_suffix + sqrt_1mab * eps_target
-            eps_pred = self.latent_dit(z_t, t, cond=cond)
+            eps_pred = self._global_denoise(z_t, t, cond=cond)
             eps_norm = eps_target.detach().norm(dim=-1).mean().item()
             z_0_pred_singlez = (z_t - sqrt_1mab * eps_pred) / sqrt_ab.clamp(min=1e-4)
 
@@ -2352,7 +2391,7 @@ class StateInjectionDiTRELAY(nn.Module):
                 t_exp = t.unsqueeze(-1)
                 eps_noise = torch.randn_like(z_0)
                 z_t = t_exp * z_0 + (1.0 - t_exp) * eps_noise
-                eps_pred = self.latent_dit(z_t, t)
+                eps_pred = self._global_denoise(z_t, t)
                 if gen_type == 'rf':
                     eps = z_0 - eps_noise
                     z_0_pred = z_t + (1.0 - t_exp) * eps_pred
@@ -2368,7 +2407,7 @@ class StateInjectionDiTRELAY(nn.Module):
                 sqrt_1mab = (1.0 - alpha_bar).sqrt().unsqueeze(-1)
                 eps = torch.randn_like(z_0)
                 z_t = sqrt_ab * z_0 + sqrt_1mab * eps
-                eps_pred = self.latent_dit(z_t, t)
+                eps_pred = self._global_denoise(z_t, t)
                 # z_0_pred derived in Step 3b for DDPM
 
         # ── Step 3b: denoised ẑ_0, blend with clean z_0 ──
@@ -2451,10 +2490,23 @@ class StateInjectionDiTRELAY(nn.Module):
         for l, st in enumerate(predicted_states):
             state = _cache_layer_state(cache, l)
             state["recurrent_state"] = st.to(torch.float32)
-            for sub_key in ("conv_state", "ffn_state"):
-                cs = state.get(sub_key)
-                if isinstance(cs, torch.Tensor):
-                    state[sub_key] = torch.zeros_like(cs)
+            # BiRWKV/RWKV need to preserve conv_state and ffn_state for RNN memory;
+            # non-RNN denoisers (DiT, ...) get them zeroed.
+            #
+            # The right convention for a recurrent denoiser is NOT established for the
+            # existing checkpoints: HEAD zeroed unconditionally, so every checkpoint trained
+            # before this change saw zeroed conv/ffn after injection, while this tree
+            # preserves them. That is a train/eval mismatch, and it cannot be resolved by
+            # argument -- so expose it. Default keeps the current (preserve) behaviour, so
+            # nothing about an in-flight run changes:
+            #   RELAY_INJECT_ZERO_RNN_CACHE=1  -> reproduce the old unconditional zeroing
+            force_zero = os.environ.get("RELAY_INJECT_ZERO_RNN_CACHE", "0") == "1"
+            is_rnn_denoiser = self.global_denoiser_type in ("rwkv", "birwkv")
+            if force_zero or not is_rnn_denoiser:
+                for sub_key in ("conv_state", "ffn_state"):
+                    cs = state.get(sub_key)
+                    if isinstance(cs, torch.Tensor):
+                        state[sub_key] = torch.zeros_like(cs)
         return cache
 
     @torch.no_grad()
@@ -2485,13 +2537,13 @@ class StateInjectionDiTRELAY(nn.Module):
 
     def _flow_sample(self, num_samples, num_steps, device, dtype):
         """Rectified flow sampling: integrate from noise (t=0) to clean (t=1)."""
-        device = device or next(self.latent_dit.parameters()).device
-        dtype = dtype or next(self.latent_dit.parameters()).dtype
+        device = device or next(self._active_denoiser().parameters()).device
+        dtype = dtype or next(self._active_denoiser().parameters()).dtype
         z = torch.randn(num_samples, self.latent_dim, device=device, dtype=dtype)
         dt = 1.0 / num_steps
         for i in range(num_steps):
             t = torch.full((num_samples,), i * dt, device=device, dtype=dtype)
-            z_0_pred = self.latent_dit(z, t)
+            z_0_pred = self._global_denoise(z, t)
             # Velocity: v = (z_0 - z_t) / (1 - t), but z_t = t*z_0 + (1-t)*noise
             # So v = z_0 - noise = (z_0_pred - z) / (1 - t)
             # Clamp (1-t) to avoid division by zero near t=1
@@ -2501,13 +2553,13 @@ class StateInjectionDiTRELAY(nn.Module):
         return z
 
     def _rf_sample(self, num_samples, num_steps, device, dtype):
-        device = device or next(self.latent_dit.parameters()).device
-        dtype = dtype or next(self.latent_dit.parameters()).dtype
+        device = device or next(self._active_denoiser().parameters()).device
+        dtype = dtype or next(self._active_denoiser().parameters()).dtype
         z = torch.randn(num_samples, self.latent_dim, device=device, dtype=dtype)
         dt = 1.0 / num_steps
         for i in range(num_steps):
             t = torch.full((num_samples,), i * dt, device=device, dtype=dtype)
-            v_pred = self.latent_dit(z, t)
+            v_pred = self._global_denoise(z, t)
             z = z + dt * v_pred
         return z
 
@@ -2595,23 +2647,23 @@ class StateInjectionDiTRELAY(nn.Module):
 
     def _ddim_sample(self, num_samples, num_steps, device, dtype):
         """DDIM deterministic sampling (η=0)."""
-        device = device or next(self.latent_dit.parameters()).device
-        dtype = dtype or next(self.latent_dit.parameters()).dtype
+        device = device or next(self._active_denoiser().parameters()).device
+        dtype = dtype or next(self._active_denoiser().parameters()).dtype
         z = torch.randn(num_samples, self.latent_dim, device=device, dtype=dtype)
         ts = torch.linspace(1.0, 0.0, num_steps + 1, device=device, dtype=dtype)
         for i in range(num_steps):
             t_cur, t_nxt = ts[i], ts[i + 1]
             ab_cur = cosine_alpha_bar(t_cur.unsqueeze(0)).to(dtype).clamp(min=1e-4)
             ab_nxt = cosine_alpha_bar(t_nxt.unsqueeze(0)).to(dtype).clamp(min=1e-4)
-            eps = self.latent_dit(z, t_cur.expand(num_samples))
+            eps = self._global_denoise(z, t_cur.expand(num_samples))
             z0_pred = (z - (1 - ab_cur).sqrt() * eps) / ab_cur.sqrt()
             z = ab_nxt.sqrt() * z0_pred + (1 - ab_nxt).sqrt() * eps
         return z
 
     def _ddpm_sample(self, num_samples, num_steps, device, dtype):
         """Standard DDPM sampling with noise at each step (η=1)."""
-        device = device or next(self.latent_dit.parameters()).device
-        dtype = dtype or next(self.latent_dit.parameters()).dtype
+        device = device or next(self._active_denoiser().parameters()).device
+        dtype = dtype or next(self._active_denoiser().parameters()).dtype
         z = torch.randn(num_samples, self.latent_dim, device=device, dtype=dtype)
         ts = torch.linspace(1.0, 0.0, num_steps + 1, device=device, dtype=dtype)
         for i in range(num_steps):
@@ -2619,7 +2671,7 @@ class StateInjectionDiTRELAY(nn.Module):
             ab_cur = cosine_alpha_bar(t_cur.unsqueeze(0)).to(dtype).clamp(min=1e-4)
             ab_nxt = cosine_alpha_bar(t_nxt.unsqueeze(0)).to(dtype).clamp(min=1e-4)
             alpha_cur = (ab_cur / ab_nxt).clamp(min=1e-4, max=1.0) if i < num_steps - 1 else ab_cur.clamp(min=1e-4)
-            eps_pred = self.latent_dit(z, t_cur.expand(num_samples))
+            eps_pred = self._global_denoise(z, t_cur.expand(num_samples))
             
             ab_cur = ab_cur.clamp(min=1e-4, max=1.0)
             one_minus_ab_cur = (1 - ab_cur).clamp(min=1e-4)

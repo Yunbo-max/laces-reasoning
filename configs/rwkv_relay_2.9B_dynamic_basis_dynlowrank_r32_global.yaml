@@ -1,0 +1,111 @@
+config_name: rwkv_relay_2.9B_dynamic_basis_dynlowrank_r32_global
+
+# GLOBAL (single-z) variant of the dynamic-basis recipe.
+#
+# Identical to configs/rwkv_relay_2.9B_dynamic_basis_dynlowrank_r32.yaml except
+# that trajectory_mode is off: the dynamic low-rank writer (dynlowrank, rank 32)
+# is kept, but it is driven by ONE global latent z instead of a chunk sequence
+# Z_{1:H}. predict_states -> _predict_states_dynlowrank is the same code path in
+# both modes (models/state_hijacking_dit.py:1112), so the writer is directly
+# comparable across global and chunked.
+#
+# Data: OWT 512-token preprocessed shards. They live in the DiffRwkv tree, not
+# here; the absolute path below is required.
+# Backbone: laces-reasoning/models/RWKV7-Goose-World3-2.9B-HF-fla-v2 is an
+# INCOMPLETE download (only .incomplete blobs). Use a complete copy.
+
+data:
+  use_preprocessed: true
+  token_dir: /inspire/hdd/global_user/zhangjiaquan-253108540222/research/DiffRwkv/preprocessed_data/owt_rwkv_tokens/train
+  latent_dir: null
+  max_length: 512
+  num_workers: 0
+  max_samples: null
+  use_external_latents: false
+
+model:
+  type: rwkv_state_hijack_dit
+  rwkv_name: RWKV/RWKV7-Goose-World3-2.9B-HF
+  rwkv_local_path: models/RWKV7-Goose-World3-2.9B-HF-fla-v2
+  rwkv_trust_remote_code: true
+  add_mask_token: false
+  pad_token_strategy: eos
+  encoder_type: variational
+  latent_dim: 32
+  n_basis: 16
+  # --- dynamic basis writer, kept from the dynamic-basis recipe ---
+  s1_writer_type: dynlowrank
+  s1_rank: 32
+  s1_dyn_hidden: 128
+  # --- S2 prior: plain DiT over a single z (global mode) ---
+  dit_hidden: 768
+  dit_depth: 8
+  dit_num_heads: 4
+  dit_num_tokens: 4
+  # --- global mode ---
+  trajectory_mode: false
+  # Denoiser that drives the single global latent: dit (default) | rwkv | birwkv.
+  # With rwkv/birwkv the recurrent prior is built at trajectory_horizon so it stays
+  # weight-compatible with the trajectory checkpoint, but only position 0 is fed.
+  global_denoiser_type: dit
+  trajectory_horizon: 16
+  use_cond_boundary: true
+
+training:
+  seed: 42
+  num_epochs: 50
+  num_train_steps: 50000
+  train_batch_size: 32        # OVERRIDE: raise until the single H200 is full
+  eval_batch_size: 1
+  dtype: bf16
+  lr_schedule: cosine
+  warmup_steps: 500
+  resume: null                # OVERRIDE: S0+S1 checkpoint to start from
+  world_size: 1
+  save_every_n_steps: 5000
+  stage: 2
+  gen_type: ddpm
+  # global stage-2 co-adaptation (see train_state_hijacking_dit.py:525,675)
+  prefix_suffix_s2: true
+  prefix_suffix_trajectory_s2: false
+  cfg_drop_prob: 0.1
+  prefix_suffix_min_prefix: 32
+  prefix_suffix_min_suffix: 32
+  s2_unfreeze_s1: true
+  s2_unfreeze_s0: false
+  s2_coadapt_ce_checkpoint: true
+  require_s1_writer_grad: true
+
+logging:
+  run_name: laces-2.9B-dynlowrank-r32-global-joint-b32-50k
+  wandb_project: laces-dynamic-basis
+  wandb_dir: ./outputs/
+  log_freq: 10
+  save_freq: 5000
+  save_dir: ./outputs_dynamic_basis
+
+loss:
+  text_loss_weight: 1.0
+  diff_loss_weight: 1.0
+  trajectory_delta_loss_weight: 0.0
+  kl_weight: 0.05
+  kl_warmup_steps: 2000
+  free_bits: 0.1
+  s2_coadapt_ce_loss_weight: 0.5
+
+optimizer:
+  name: adamw
+  lr: 1.0e-04
+  weight_decay: 0.01
+  beta1: 0.9
+  beta2: 0.95
+  eps: 1.0e-08
+  grad_clip_norm: 1.0
+
+tokenizer:
+  cache_dir: ./data/huggingface
+  local_files_only: true
+
+hydra:
+  job:
+    chdir: false

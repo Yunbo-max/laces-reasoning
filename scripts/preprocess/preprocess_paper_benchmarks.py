@@ -15,7 +15,7 @@ def parse_args():
     p.add_argument("--benchmark", required=True, choices=("mmlu", "mmlu_pro", "race", "siqa", "commonsenseqa", "story_cloze", "squad", "xsum", "wmt14_de_en", "lm1b"))
     p.add_argument("--split", default=None)
     p.add_argument("--out_root", default="preprocessed_data")
-    p.add_argument("--model_path", default="/inspire/hdd/global_user/zhangjiaquan-253108540222/models/RWKV7-Goose-World3-2.9B-HF")
+    p.add_argument("--model_path", default="/inspire/hdd/global_user/zhangjiaquan-253108540222/backup/laces-reasoning/models/RWKV7-Goose-World3-2.9B-HF")
     p.add_argument("--max_len", type=int, default=512)
     p.add_argument("--max_samples", type=int, default=None)
     return p.parse_args()

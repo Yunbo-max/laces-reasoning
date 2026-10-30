@@ -11,7 +11,7 @@ sys.path.insert(0, str(REPO))
 BACKBONES = {
     "0.4B": "/inspire/hdd/global_user/zhangjiaquan-253108540222/models/rwkv7-0.4B-world",
     "1.5B": "/inspire/hdd/global_user/zhangjiaquan-253108540222/models/RWKV7-Goose-World3-1.5B-HF",
-    "2.9B": "/inspire/hdd/global_user/zhangjiaquan-253108540222/models/RWKV7-Goose-World3-2.9B-HF",
+    "2.9B": "/inspire/hdd/global_user/zhangjiaquan-253108540222/backup/laces-reasoning/models/RWKV7-Goose-World3-2.9B-HF",
     "7.2B": "/inspire/hdd/global_user/zhangjiaquan-253108540222/models/RWKV7-7.2B-g0",
     "13.3B": "/inspire/hdd/global_user/zhangjiaquan-253108540222/models/RWKV7-G1f-13.3B-HF",
 }

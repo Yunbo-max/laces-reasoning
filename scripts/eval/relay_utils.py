@@ -79,7 +79,22 @@ def load_relay_model(
         latent_stats_path=cfg.model.get("latent_stats_path", None),
     ).to(device)
 
-    model.load_state_dict(ckpt["trainable_state"], strict=False)
+    missing, unexpected = model.load_state_dict(ckpt["trainable_state"], strict=False)
+    # A silent drop here is exactly how the global-birwkv 0.5% happened: a checkpoint carrying a
+    # recurrent denoiser was loaded into a DiT-only model, all 473 trajectory_dit.* tensors were
+    # discarded, and sampling then ran an untrained latent_dit. So always report the counts, and
+    # shout when a denoiser module mismatches the checkpoint in either direction.
+    if missing or unexpected:
+        print(f"[load_relay_model] {os.path.basename(str(ckpt_dir).rstrip('/'))}: "
+              f"missing={len(missing)} unexpected={len(unexpected)}", flush=True)
+    for mod in ("trajectory_dit", "latent_dit"):
+        n_missing = sum(1 for k in missing if k.split(".")[0] == mod)
+        n_unexp = sum(1 for k in unexpected if k.split(".")[0] == mod)
+        if n_missing or n_unexp:
+            print(f"[load_relay_model] WARNING denoiser '{mod}': {n_missing} built-but-absent / "
+                  f"{n_unexp} present-but-not-built -- one side is running at random init "
+                  f"(check global_denoiser_type / trajectory_mode against the checkpoint config).",
+                  flush=True)
     model._gen_type = str(cfg.training.get("gen_type", "ddpm"))
     model._training_stage = int(cfg.training.get("stage", 1))
     for p in model.parameters():

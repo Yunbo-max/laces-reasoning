@@ -12,6 +12,7 @@ import argparse
 import json
 import re
 import sys
+import unicodedata
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -25,15 +26,28 @@ from scripts.eval.sample_prefix_suffix_cfg import encode_prefix, sample_ddim_cfg
 from scripts.eval import diag_loop1_common as C  # noqa: E402
 
 
+GSM8K_LOCAL = "/inspire/hdd/global_user/zhangjiaquan-253108540222/capability_eval_data/tasks/gsm8k_tasks.jsonl"
+
+
 def _load_task(task, n):
     from datasets import load_dataset
 
     items = []
     if task == "gsm8k":
-        d = load_dataset("gsm8k", "main", split="test")
-        for r in list(d)[:n]:
-            m = re.search(r"####\s*([-0-9.,]+)", r["answer"])
-            items.append((r["question"], (m.group(1).replace(",", "") if m else None)))
+        try:
+            d = load_dataset("gsm8k", "main", split="test")
+        except Exception:
+            d = None  # offline (compute nodes have no network): fall back to local jsonl
+        if d is not None:
+            for r in list(d)[:n]:
+                m = re.search(r"####\s*([-0-9.,]+)", r["answer"])
+                items.append((r["question"], (m.group(1).replace(",", "") if m else None)))
+        else:
+            for line in open(GSM8K_LOCAL, encoding="utf-8"):
+                r = json.loads(line)
+                items.append((r["problem"], str(r["answer"]).replace(",", "")))
+                if len(items) >= n:
+                    break
     elif task == "svamp":
         for line in open("baseline/reasoning_eval/svamp.jsonl"):
             r = json.loads(line)
@@ -45,8 +59,20 @@ def _load_task(task, n):
 
 
 def _extract_num(text):
-    nums = re.findall(r"-?\d[\d,]*\.?\d*", text.replace(",", ""))
-    return nums[-1] if nums else None
+    """Prefer GSM8K's canonical ``#### <answer>`` marker; fall back to the last number.
+
+    Taking the last number unconditionally is wrong whenever the model keeps
+    talking past its final answer (max_new_tokens=200 here, so this is common):
+    the tail often ends in a stray list marker ("1.") or an unrelated number, and
+    a correct ``#### 540`` then scores as wrong. NFKC also folds full-width digits
+    (e.g. "１９") that the old rule could not parse at all.
+    """
+    t = unicodedata.normalize("NFKC", text)
+    m = re.findall(r"####\s*(-?[\d,]+(?:\.\d+)?)", t)
+    if m:
+        return m[-1].replace(",", "")
+    nums = re.findall(r"-?\d[\d,]*(?:\.\d+)?", t.replace(",", ""))
+    return nums[-1].rstrip(".") if nums else None
 
 
 def _match(pred, gt):

@@ -202,7 +202,7 @@ def run(args):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--drafter", default="/inspire/hdd/global_user/zhangjiaquan-253108540222/models/rwkv7-0.4B-world")
-    ap.add_argument("--verifier", default="/inspire/hdd/global_user/zhangjiaquan-253108540222/models/RWKV7-Goose-World3-2.9B-HF")
+    ap.add_argument("--verifier", default="/inspire/hdd/global_user/zhangjiaquan-253108540222/backup/laces-reasoning/models/RWKV7-Goose-World3-2.9B-HF")
     ap.add_argument("--token_dir", default="preprocessed_data/owt_rwkv_tokens/train")
     ap.add_argument("--out", default="outputs_eval/bench_dual_model_wallclock.json")
     ap.add_argument("--num_samples", type=int, default=20)

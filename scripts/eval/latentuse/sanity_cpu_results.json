@@ -1,0 +1,58 @@
+[
+  {
+    "check": "1 deep-copy isolates every cache field",
+    "denominator": 12,
+    "negative_control_passes": true,
+    "positive_control_fires": true,
+    "calibrated": true,
+    "detail": "deep copy aliased 0/12; shallow copy aliased 12/12"
+  },
+  {
+    "check": "2 A1 principal-memory restore is bit-exact",
+    "denominator": 4,
+    "negative_control_passes": true,
+    "positive_control_fires": true,
+    "calibrated": true,
+    "detail": "bf16 round-trip detected as non-identical on 4/4 layers (torch.equal, not allclose)"
+  },
+  {
+    "check": "3 A3 derangement has no fixed point and donor!=recipient AS TENSORS",
+    "denominator": 200,
+    "negative_control_passes": true,
+    "positive_control_fires": true,
+    "calibrated": true,
+    "detail": "tensor-identity control: planted 1 bit-identical pair, detector found 1/1 (index check alone would have missed it)"
+  },
+  {
+    "check": "4 invalid answers are WRONG, denominator never shrinks, empty!=option A",
+    "denominator": 6,
+    "negative_control_passes": true,
+    "positive_control_fires": true,
+    "calibrated": true,
+    "detail": "invalid=3/6; true denominator=6, drop-invalids=3; unguarded letter_of('')='' -> would index option 0 (guard is load-bearing); 'darwin'->c=True,inv=False; '!!!!!'->c=False,inv=True; ''->c=False,inv=True; '   '->c=False,inv=True; 'The answer is darwin.'->c=True,inv=False; 'shaw'->c=False,inv=False"
+  },
+  {
+    "check": "5 inject_into_cache does NOT reset counters; blend_into_cache DOES",
+    "denominator": 2,
+    "negative_control_passes": true,
+    "positive_control_fires": true,
+    "calibrated": true,
+    "detail": "inject resets counters: False; blend resets counters: True => A0 (skip adapter) and lambda=0 blend are NOT the same branch"
+  },
+  {
+    "check": "6 prefix-replay conflict is real and training does NOT re-feed",
+    "denominator": 3,
+    "negative_control_passes": true,
+    "positive_control_fires": true,
+    "calibrated": true,
+    "detail": "generate_answer re-feeds prefix: True (forwards=3); generate_raw_answer re-feeds: False (forwards=2); _singlez_coadapt_ce_from_z re-feeds prefix: False, forwards suffix: True"
+  },
+  {
+    "check": "7 source row counts are exactly 200 per task",
+    "denominator": 3,
+    "negative_control_passes": true,
+    "positive_control_fires": true,
+    "calibrated": true,
+    "detail": "pinned source baseline-133b-global: {'sciq': 200, 'commonsenseqa': 200, 'race': 200}; positive control (a 100-row RACE dir that WOULD be rejected): ('/inspire/hdd/global_user/zhangjiaquan-253108540222/research/laces-reasoning/results/benchmarks/baseline-llama-3.2-3b', 100)"
+  }
+]

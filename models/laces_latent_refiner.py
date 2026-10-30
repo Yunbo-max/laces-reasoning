@@ -250,12 +250,22 @@ class LACESRuntime:
     @torch.no_grad()
     def generate(self, prefix_ids, z, *, max_new_tokens: int, raw: bool = False,
                  temperature: float = 0., top_k: int = 0, top_p: float = 1.,
-                 repetition_penalty: float = 1., eos_id: int | None = None):
+                 repetition_penalty: float = 1., eos_id: int | None = None,
+                 eos_ids: list[int] | None = None):
+        """``eos_ids`` is the full stop set; ``eos_id`` is kept for older callers.
+
+        2026-09-21: a single ``eos_id`` is not enough. RWKV-7 declares three different eos
+        values (``generation_config`` 0 = the real end-of-text, ``config`` 2, and
+        ``tokenizer.eos_token_id`` 65530, which never appears), so a caller that passed the
+        tokenizer's value alone produced a stop check that could never fire and every row ran
+        to its full budget. See ``run_open_context_bench.resolve_stop_ids``.
+        """
         from scripts.eval.sample_prefix_suffix_trajectory_cfg import apply_repetition_penalty, apply_top_p
         stream = self._stream(prefix_ids, z, max_new_tokens, raw=raw)
         logits = next(stream)
         ids, raw_logps = [], []
         history = prefix_ids[0].tolist()
+        stop = set(eos_ids or ([] if eos_id is None else [eos_id]))
         for index in range(max_new_tokens):
             sample_logits = apply_repetition_penalty(logits.float(), history, repetition_penalty)
             if temperature <= 0:
@@ -268,7 +278,7 @@ class LACESRuntime:
                     probabilities /= probabilities.sum()
                 probabilities = apply_top_p(probabilities, top_p)
                 token = int(torch.multinomial(probabilities, 1))
-            if eos_id is not None and token == eos_id:
+            if token in stop:
                 break
             ids.append(token)
             history.append(token)
