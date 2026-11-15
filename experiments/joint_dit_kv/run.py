@@ -62,13 +62,17 @@ def save_checkpoint(system, model_id, stage, path, step, extra=None):
     }, path)
 
 
-def raw_generate(system, prompt: str, device, new_tokens: int):
+def raw_generate(system, prompt: str, device, new_tokens: int,
+                 temperature: float = 0.0, top_p: float = 0.9):
     tokens = system.tokenizer(prompt, return_tensors="pt", add_special_tokens=False,
                               truncation=True, max_length=2048)["input_ids"].to(device)
-    ids = system.receiver.generate(
-        input_ids=tokens, max_new_tokens=new_tokens, do_sample=False,
-        pad_token_id=system.tokenizer.eos_token_id,
-    )
+    kwargs = {"input_ids": tokens, "max_new_tokens": new_tokens,
+              "pad_token_id": system.tokenizer.eos_token_id}
+    if temperature > 0:
+        kwargs.update(do_sample=True, temperature=temperature, top_p=top_p)
+    else:
+        kwargs.update(do_sample=False)
+    ids = system.receiver.generate(**kwargs)
     return system.tokenizer.decode(ids[0, tokens.size(1):], skip_special_tokens=True).strip()
 
 
@@ -77,7 +81,8 @@ def sync(device):
         torch.cuda.synchronize(device)
 
 
-def evaluate(system, data, device, strategy, max_new, out_file=None, limit=None, seed=42):
+def evaluate(system, data, device, strategy, max_new, out_file=None, limit=None,
+             seed=42, temperature: float = 0.0, top_p: float = 0.9):
     system.eval()
     counts = []
     rows = []
@@ -89,7 +94,8 @@ def evaluate(system, data, device, strategy, max_new, out_file=None, limit=None,
         if strategy in ("joint", "independent", "mean"):
             conditions = system.encode_conditions(example.agents, example.question, device)
             latents = system.latent(conditions, strategy=strategy)
-            answer = system.generate(latents, example.question, device, max_new_tokens=max_new)
+            answer = system.generate(latents, example.question, device, max_new_tokens=max_new,
+                                     temperature=temperature, top_p=top_p)
             # This is a virtual KV prefix; count transmitted latent content separately.
             latent_bytes = len(example.agents) * system.cfg.slots * system.cfg.latent_dim * 2
             input_tokens = sum(len(system.tokenizer.encode(s, add_special_tokens=False))
@@ -98,7 +104,8 @@ def evaluate(system, data, device, strategy, max_new, out_file=None, limit=None,
             prompt = ("Evidence:\n" +
                       "\n".join("Agent " + str(i+1) + ": " + a for i, a in enumerate(example.agents)) +
                       "\nQuestion: " + example.question + "\nAnswer:")
-            answer = raw_generate(system, prompt, device, max_new)
+            answer = raw_generate(system, prompt, device, max_new,
+                                  temperature=temperature, top_p=top_p)
             latent_bytes = 0
             input_tokens = len(system.tokenizer.encode(prompt, add_special_tokens=False))
         elif strategy == "question_only":
@@ -164,7 +171,7 @@ def train(args, device):
     opt = torch.optim.AdamW(parameters, lr=args.lr, weight_decay=0.01)
     system.train()
     rng = random.Random(args.seed)
-    best_accuracy = -1.0
+    best_accuracy = None
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
     (out / "settings.json").write_text(json.dumps(
@@ -219,7 +226,7 @@ def train(args, device):
                                       "joint" if args.stage == "joint" else "independent",
                                       args.max_new_tokens, limit=args.eval_limit, seed=args.seed)
                 score = metric["accuracy"]
-            if score > best_accuracy or step == args.eval_every:
+            if best_accuracy is None or score > best_accuracy:
                 best_accuracy = score
                 save_checkpoint(system, model_id, args.stage, out / "best.pt", step, metric)
             (out / "dev_latest.json").write_text(json.dumps({"step": step, **metric}, indent=2))
@@ -261,6 +268,9 @@ def main():
     ap.add_argument("--log-every", type=int, default=20)
     ap.add_argument("--max-new-tokens", type=int, default=32)
     ap.add_argument("--seed", type=int, default=42)
+    ap.add_argument("--temperature", type=float, default=0.7,
+                    help="Final eval sampling; checkpoint selection is greedy")
+    ap.add_argument("--top-p", type=float, default=0.9)
     args = ap.parse_args()
     if args.eval_every < 1 or args.grad_accum < 1:
         ap.error("eval-every and grad-accum must be positive")
@@ -283,7 +293,8 @@ def main():
         with torch.no_grad():
             result = evaluate(system, dataset, device, args.strategy, args.max_new_tokens,
                               out_file=args.prediction_file or str(Path(args.out)/"predictions.jsonl"),
-                              seed=args.seed)
+                              seed=args.seed, temperature=args.temperature,
+                              top_p=args.top_p)
         print(json.dumps(result, indent=2))
 
 
