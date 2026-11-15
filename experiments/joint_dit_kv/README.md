@@ -198,3 +198,50 @@ separate from training, model selection and hyperparameter sweeps.
   uncertainty, total GPU-hours, transmitted bytes vs resident KV size and
   latency decomposition. A method beating LatentMAS on a small toy is not
   enough to claim a research advance.
+
+
+## Real training data: HotpotQA distributed documents
+
+For a non-toy **training** corpus, the official HotpotQA distractor **train**
+split can be converted to four local-agent document messages. The script uses
+question-word-overlap retrieval and only the sentence text for local evidence.
+Supporting fact labels are used for a *coverage audit only*, never for
+selecting which documents an agent sees.
+
+Install datasets and convert either its official training JSON (optional
+--local-json) or the Hugging Face Parquet-backed training split:
+
+    python -m pip install datasets
+    python -m experiments.joint_dit_kv.prepare_hotpot \
+      --out data/hotpot_distributed_train --agents 4 \
+      --sentences-per-agent 3 --holdout-percent 5
+
+Use the generated data/hotpot_distributed_train/train.jsonl and dev.jsonl
+in the AE/joint/independent commands above. For longer evidence in AE,
+start AE with --max-text-tokens 256, then stage 2 loads the same config.
+The converter does not touch the official HotpotQA validation/test split;
+do not use benchmark scores for model selection. HotpotQA is licensed
+CC BY-SA 4.0; honor attribution and terms.
+
+Before scientific comparison: add official metric (answer EM/F1), comparable
+answer-format prompts across official LatentMAS, document coverage stratified
+by agent, three paired seeds and a matched deterministic joint-attention
+model. The minimal synthetic-smoke accuracy is not a publishable result.
+
+## Causal evidence controls
+
+After training a joint checkpoint, remove or swap exactly one agent's
+private evidence using the SAME checkpoint and output scorer:
+
+    python -m experiments.joint_dit_kv.run --command eval \
+      --strategy joint --checkpoint runs/joint_dit/best.pt \
+      --data data/joint_dit_smoke/dev.jsonl --ablate-agent 1 \
+      --out runs/eval_ablate1
+
+    python -m experiments.joint_dit_kv.run --command eval \
+      --strategy joint --checkpoint runs/joint_dit/best.pt \
+      --data data/joint_dit_smoke/dev.jsonl --swap-agent 1 \
+      --out runs/eval_swap1
+
+Indices are 0-based. Swap takes evidence from the next paired evaluation
+example, not another agent of the same example.
