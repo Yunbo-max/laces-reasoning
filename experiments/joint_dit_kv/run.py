@@ -123,7 +123,8 @@ def evaluate(system, data, device, strategy, max_new, out_file=None, limit=None,
             input_tokens = len(system.tokenizer.encode(prompt, add_special_tokens=False))
         elif strategy == "question_only":
             prompt = "Question: " + example.question + "\nAnswer:"
-            answer = raw_generate(system, prompt, device, max_new)
+            answer = raw_generate(system, prompt, device, max_new,
+                                  temperature=temperature, top_p=top_p)
             latent_bytes = 0
             input_tokens = len(system.tokenizer.encode(prompt, add_special_tokens=False))
         else:
