@@ -120,6 +120,7 @@ class KVWriter(nn.Module):
     def __init__(self, cfg: JointConfig, decoder_config):
         super().__init__()
         self.cfg = cfg
+        self.decoder_config = decoder_config
         self.layers = int(decoder_config.num_hidden_layers)
         self.kv_heads = int(decoder_config.num_key_value_heads)
         self.head_dim = int(getattr(decoder_config, "head_dim", None)
@@ -147,7 +148,7 @@ class KVWriter(nn.Module):
         try:
             cache = DynamicCache()
         except TypeError:
-            cache = DynamicCache(config=None)
+            cache = DynamicCache(config=self.decoder_config)
         tensors = self(slots).to(dtype=dtype)
         for layer in range(self.layers):
             cache.update(tensors[layer, 0], tensors[layer, 1], layer)
@@ -238,7 +239,8 @@ class JointSystem(nn.Module):
 
     @torch.no_grad()
     def generate(self, latents: torch.Tensor, question: str, device: torch.device,
-                 max_new_tokens: int = 48) -> str:
+                 max_new_tokens: int = 48, temperature: float = 0.0,
+                 top_p: float = 0.9) -> str:
         self.receiver.eval()
         slots = latents.flatten(1, 2)
         ids = self.tokenizer("Question: " + question + "\nAnswer:",
@@ -250,7 +252,16 @@ class JointSystem(nn.Module):
         generated = []
         at = prefix + ids.shape[1]
         for _ in range(max_new_tokens):
-            next_id = torch.argmax(next_logits, dim=-1, keepdim=True)
+            if temperature <= 0:
+                next_id = torch.argmax(next_logits, dim=-1, keepdim=True)
+            else:
+                probs = torch.softmax(next_logits.float() / temperature, dim=-1)
+                sorted_probs, sorted_indices = probs.sort(dim=-1, descending=True)
+                remove = sorted_probs.cumsum(dim=-1) - sorted_probs > top_p
+                sorted_probs = sorted_probs.masked_fill(remove, 0)
+                sorted_probs = sorted_probs / sorted_probs.sum(dim=-1, keepdim=True).clamp_min(1e-12)
+                sample_idx = torch.multinomial(sorted_probs, 1)
+                next_id = sorted_indices.gather(-1, sample_idx)
             token_id = int(next_id.item())
             if token_id == self.tokenizer.eos_token_id:
                 break
