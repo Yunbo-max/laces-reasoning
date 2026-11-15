@@ -43,7 +43,9 @@ def make_system(args, device, ckpt=None):
     cfg = (JointConfig(**ckpt["config"]) if ckpt is not None else
            JointConfig(latent_dim=args.dim, slots=args.slots, max_agents=args.max_agents,
                        max_text_tokens=args.max_text_tokens, heads=args.heads,
-                       dit_layers=args.layers, sample_steps=args.sample_steps))
+                       dit_layers=args.layers, sample_steps=(args.sample_steps or 4)))
+    if ckpt is not None and args.sample_steps is not None:
+        cfg.sample_steps = args.sample_steps
     model_id = ckpt["model_id"] if ckpt is not None else args.model
     receiver, tokenizer = load_frozen_model(model_id, device)
     system = JointSystem(receiver, tokenizer, cfg).to(device)
@@ -82,27 +84,38 @@ def sync(device):
 
 
 def evaluate(system, data, device, strategy, max_new, out_file=None, limit=None,
-             seed=42, temperature: float = 0.0, top_p: float = 0.9):
+             seed=42, temperature: float = 0.0, top_p: float = 0.9,
+             ablate_agent: int = -1, swap_agent: int = -1):
     system.eval()
     counts = []
     rows = []
     eval_set = data if limit is None else data[:limit]
     for ix, example in enumerate(eval_set):
         torch.manual_seed(seed + ix)
+        agent_texts = list(example.agents)
+        if 0 <= ablate_agent < len(agent_texts):
+            agent_texts[ablate_agent] = "No private evidence available."
+        if 0 <= swap_agent < len(agent_texts):
+            if len(eval_set) < 2:
+                raise ValueError("swapped-agent control requires >=2 examples")
+            donor = eval_set[(ix + 1) % len(eval_set)].agents
+            if len(donor) <= swap_agent:
+                raise ValueError("Agent count mismatch in swapped evidence control")
+            agent_texts[swap_agent] = donor[swap_agent]
         sync(device)
         t0 = time.perf_counter()
         if strategy in ("joint", "independent", "mean"):
-            conditions = system.encode_conditions(example.agents, example.question, device)
+            conditions = system.encode_conditions(agent_texts, example.question, device)
             latents = system.latent(conditions, strategy=strategy)
             answer = system.generate(latents, example.question, device, max_new_tokens=max_new,
                                      temperature=temperature, top_p=top_p)
             # This is a virtual KV prefix; count transmitted latent content separately.
-            latent_bytes = len(example.agents) * system.cfg.slots * system.cfg.latent_dim * 2
+            latent_bytes = len(agent_texts) * system.cfg.slots * system.cfg.latent_dim * 2
             input_tokens = sum(len(system.tokenizer.encode(s, add_special_tokens=False))
-                               for s in example.agents)
+                               for s in agent_texts)
         elif strategy == "full_text":
             prompt = ("Evidence:\n" +
-                      "\n".join("Agent " + str(i+1) + ": " + a for i, a in enumerate(example.agents)) +
+                      "\n".join("Agent " + str(i+1) + ": " + a for i, a in enumerate(agent_texts)) +
                       "\nQuestion: " + example.question + "\nAnswer:")
             answer = raw_generate(system, prompt, device, max_new,
                                   temperature=temperature, top_p=top_p)
@@ -124,6 +137,8 @@ def evaluate(system, data, device, strategy, max_new, out_file=None, limit=None,
             "gold": example.answer, "correct": correct, "time_ms": elapsed,
             "latent_payload_bytes": latent_bytes,
             "local_evidence_tokens": input_tokens,
+            "ablate_agent_index": ablate_agent,
+            "swapped_agent_index": swap_agent,
         })
     result = {
         "strategy": strategy, "n": len(rows),
@@ -132,6 +147,8 @@ def evaluate(system, data, device, strategy, max_new, out_file=None, limit=None,
         "latent_payload_bytes_per_example": (sum(r["latent_payload_bytes"] for r in rows)
                                              / max(1, len(rows))),
         "note": "Prototype conservative exact-match scorer; use benchmark official metric for papers",
+        "ablate_agent_index": ablate_agent,
+        "swapped_agent_index": swap_agent,
     }
     if out_file:
         path = Path(out_file)
@@ -255,7 +272,8 @@ def main():
     ap.add_argument("--max-text-tokens", type=int, default=96)
     ap.add_argument("--heads", type=int, default=4)
     ap.add_argument("--layers", type=int, default=4)
-    ap.add_argument("--sample-steps", type=int, default=4)
+    ap.add_argument("--sample-steps", type=int, default=None,
+                    help="AE default=4; override pretrained config in stage2 if set")
     ap.add_argument("--steps", type=int, default=1000)
     ap.add_argument("--grad-accum", type=int, default=4)
     ap.add_argument("--lr", type=float, default=2e-4)
@@ -271,6 +289,10 @@ def main():
     ap.add_argument("--temperature", type=float, default=0.7,
                     help="Final eval sampling; checkpoint selection is greedy")
     ap.add_argument("--top-p", type=float, default=0.9)
+    ap.add_argument("--ablate-agent", type=int, default=-1,
+                    help="Zero one agent evidence during eval; 0-indexed")
+    ap.add_argument("--swap-agent", type=int, default=-1,
+                    help="Swap one agent evidence with next example during eval; 0-indexed")
     args = ap.parse_args()
     if args.eval_every < 1 or args.grad_accum < 1:
         ap.error("eval-every and grad-accum must be positive")
@@ -294,7 +316,8 @@ def main():
             result = evaluate(system, dataset, device, args.strategy, args.max_new_tokens,
                               out_file=args.prediction_file or str(Path(args.out)/"predictions.jsonl"),
                               seed=args.seed, temperature=args.temperature,
-                              top_p=args.top_p)
+                              top_p=args.top_p, ablate_agent=args.ablate_agent,
+                              swap_agent=args.swap_agent)
         print(json.dumps(result, indent=2))
 
 
