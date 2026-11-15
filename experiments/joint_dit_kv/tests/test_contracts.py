@@ -95,3 +95,28 @@ def test_small_qwen_cache_grad_through_writer():
     assert system.writer.net[-1].weight.grad is not None
     assert system.flow.net.out[-1].weight.grad is not None
     assert all(p.grad is None for p in llm.parameters())
+
+
+def test_hotpot_conversion_uses_no_support_labels():
+    from experiments.joint_dit_kv.prepare_hotpot import build_example
+    sample = {
+        "id": "hotpot-1",
+        "question": "Where was the Alpha telescope built?",
+        "answer": "Cambridge",
+        "context": {
+            "title": ["Alpha telescope", "Building", "Random", "Other"],
+            "sentences": [
+                ["The Alpha telescope was created by Alice."],
+                ["Alice built it in Cambridge."],
+                ["A random city was mentioned."],
+                ["The invention was famous."],
+            ],
+        },
+        "supporting_facts": {"title": ["Alpha telescope", "Building"], "sent_id": [0, 0]},
+    }
+    before = build_example(sample, 3, 2)
+    sample["supporting_facts"] = {"title": ["Other"], "sent_id": [0]}
+    after = build_example(sample, 3, 2)
+    assert before[0]["agents"] == after[0]["agents"]
+    assert before[0]["question"] == after[0]["question"]
+    assert before[1:] != after[1:]
